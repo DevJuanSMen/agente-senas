@@ -1,0 +1,74 @@
+<!doctype html>
+<meta charset="utf-8" />
+<pre id="estado">iniciando</pre>
+<script type="module">
+  import { FilesetResolver, HandLandmarker } from "/vision.mjs";
+
+  // MISMA normalización que src/lib/normalizar.ts de la app.
+  function normalizar(puntos, aspecto, esIzquierda) {
+    const m = puntos[0];
+    const rel = puntos.map((p) => ({ x: (p.x - m.x) * aspecto, y: p.y - m.y, z: (p.z - m.z) * aspecto }));
+    const b = rel[9];
+    const escala = Math.hypot(b.x, b.y, b.z) || 1;
+    const v = [];
+    for (const p of rel) v.push((esIzquierda ? -p.x : p.x) / escala, p.y / escala, p.z / escala);
+    return v.map((n) => Math.round(n * 10000) / 10000);
+  }
+
+  const estado = document.getElementById("estado");
+  window.progreso = { hechas: 0, total: 0, conMano: 0, fin: false, error: null, etapa: "inicio" };
+  try {
+    window.progreso.etapa = "wasm";
+    const archivos = await FilesetResolver.forVisionTasks("/mp/wasm");
+    window.progreso.etapa = "modelo";
+    const detector = await HandLandmarker.createFromOptions(archivos, {
+      baseOptions: { modelAssetPath: "/mp/hand_landmarker.task", delegate: "CPU" },
+      runningMode: "IMAGE",
+      numHands: 2,
+      minHandDetectionConfidence: 0.4,
+      minHandPresenceConfidence: 0.4,
+    });
+    window.progreso.etapa = "lista";
+    const lista = await (await fetch("/lista")).json();
+    window.progreso.etapa = "imagenes";
+    window.progreso.total = lista.length;
+    const salida = [];
+    for (const ruta of lista) {
+      let hecho = false, ultimoError = "";
+      for (let intento = 0; intento < 4 && !hecho; intento++) {
+        const img = new Image();
+        img.src = "/img/" + ruta.split("/").map(encodeURIComponent).join("/") + (intento ? `?r=${intento}` : "");
+        try {
+          await img.decode();
+          const r = detector.detect(img);
+          const aspecto = img.naturalWidth / img.naturalHeight;
+          const manos = r.landmarks.map((p, i) => {
+            const lado = r.handedness[i]?.[0];
+            const xs = p.map((q) => q.x), ys = p.map((q) => q.y);
+            return {
+              v: normalizar(p, aspecto, lado?.categoryName === "Left"),
+              lado: lado?.categoryName, score: lado?.score,
+              muneca: [p[0].x, p[0].y],
+              tamano: Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)),
+            };
+          });
+          if (manos.length) window.progreso.conMano++;
+          salida.push({ ruta, manos });
+          hecho = true;
+        } catch (e) {
+          ultimoError = String(e);
+          await new Promise((ok) => setTimeout(ok, 150 * (intento + 1)));
+        }
+      }
+      if (!hecho) salida.push({ ruta, manos: [], error: ultimoError });
+      window.progreso.hechas++;
+      if (window.progreso.hechas % 50 === 0) estado.textContent = JSON.stringify(window.progreso);
+    }
+    window.progreso.etapa = "enviar";
+    window.resultado = JSON.stringify(salida);
+    window.progreso.fin = true;
+  } catch (e) {
+    window.progreso.error = window.progreso.etapa + ": " + String(e);
+  }
+  estado.textContent = JSON.stringify(window.progreso);
+</script>

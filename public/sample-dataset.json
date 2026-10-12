@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "nota": "Estructura de ejemplo. Cada muestra es un vector de 63 números: los 21 puntos de la mano (x, y, z) relativos a la muñeca y escalados por el tamaño de la mano. Grábalas desde el módulo Captura y expórtalas desde allí.",
+  "labels": {
+    "A": [],
+    "1": []
+  },
+  "descripciones": {
+    "A": "Escribe aquí cómo se forma la seña (pendiente de validar por alguien que conozca LSC)."
+  }
+}
